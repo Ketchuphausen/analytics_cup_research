@@ -1,93 +1,110 @@
-"""
-Simple utility functions for calculations
-"""
-
 import numpy as np
 import pandas as pd
 
 
 def calculate_distance(x1, y1, x2, y2):
     """
-    Calculate Euclidean distance between two points
+    Calculate Euclidean distance between two points.
 
     Args:
-        x1, y1: First point coordinates
-        x2, y2: Second point coordinates
+        x1, y1: First point coordinates (scalar or array)
+        x2, y2: Second point coordinates (scalar or array)
 
     Returns:
-        Distance in meters
+        float or np.array: Distance in meters
     """
     return np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
 
 def calculate_velocity(df, player_id=None):
     """
-    Calculate velocity (speed) from position changes
+    Calculate frame-to-frame velocity from position changes.
 
     Args:
-        df: Tracking DataFrame with columns: frame, timestamp, player_id, x, y
-        player_id: Optional - calculate for specific player only
+        df (pd.DataFrame): Tracking data with columns: frame, timestamp, player_id, x, y
+        player_id (int, optional): Calculate for specific player only
 
     Returns:
-        DataFrame with added 'velocity' column (m/s)
+        pd.DataFrame: Original DataFrame with added 'velocity' column (m/s)
     """
     df = df.copy()
 
     if player_id is not None:
-        # Filter for specific player
         df = df[df["player_id"] == player_id].copy()
 
-    # Sort by player and frame
     df = df.sort_values(["player_id", "frame"]).reset_index(drop=True)
 
-    # Calculate distance moved
-    df["x_prev"] = df.groupby("player_id")["x"].shift(1)
-    df["y_prev"] = df.groupby("player_id")["y"].shift(1)
-    df["time_prev"] = df.groupby("player_id")["timestamp"].shift(1)
+    # Calculate distance and time delta
+    df["x_diff"] = df.groupby("player_id")["x"].diff()
+    df["y_diff"] = df.groupby("player_id")["y"].diff()
+    df["distance"] = np.sqrt(df["x_diff"] ** 2 + df["y_diff"] ** 2)
 
-    # Distance
-    df["distance"] = calculate_distance(df["x_prev"], df["y_prev"], df["x"], df["y"])
+    # Time delta in seconds
+    df["time_delta"] = pd.to_timedelta(df["timestamp"]).dt.total_seconds().diff()
 
-    # Time delta (convert timestamp to seconds if needed)
-    df["time_delta"] = (
-        pd.to_timedelta(df["timestamp"]).dt.total_seconds()
-        - pd.to_timedelta(df["time_prev"]).dt.total_seconds()
-    )
-
-    # Velocity = distance / time
+    # Velocity
     df["velocity"] = df["distance"] / df["time_delta"]
-
-    # Clean up
-    df = df.drop(["x_prev", "y_prev", "time_prev", "distance", "time_delta"], axis=1)
-
-    # First frame has no velocity
     df["velocity"] = df["velocity"].fillna(0)
+
+    # Cleanup temporary columns
+    df = df.drop(["x_diff", "y_diff", "distance", "time_delta"], axis=1)
 
     return df
 
 
-def detect_runs(df, velocity_threshold=5.0, min_duration=1.0):
+def detect_runs(df, velocity_threshold=5.0, min_duration=3.0):
     """
-    Detect off-ball runs (high-speed movement without ball)
+    Filter for high-speed runs lasting at least min_duration seconds.
 
     Args:
-        df: Tracking DataFrame with velocity column
-        velocity_threshold: Minimum speed to count as "running" (m/s)
-        min_duration: Minimum duration to count as a "run" (seconds)
+        df (pd.DataFrame): Tracking data with 'velocity' column
+        velocity_threshold (float): Minimum speed in m/s (default: 5.0)
+        min_duration (float): Minimum duration in seconds (default: 3.0)
 
     Returns:
-        DataFrame filtered to only running frames
+        pd.DataFrame: Filtered to sustained runs
+
+    Raises:
+        ValueError: If 'velocity' column missing
     """
-    # Must have velocity column
     if "velocity" not in df.columns:
         raise ValueError(
-            "DataFrame must have 'velocity' column. Use calculate_velocity() first."
+            "DataFrame must have 'velocity' column. Run calculate_velocity() first."
         )
 
     # Filter for high velocity
-    runs = df[df["velocity"] >= velocity_threshold].copy()
+    high_speed = df[df["velocity"] >= velocity_threshold].copy()
 
-    print(f"✓ Detected {len(runs):,} frames with velocity >= {velocity_threshold} m/s")
+    # Group consecutive frames per player
+    high_speed = high_speed.sort_values(["player_id", "frame"]).reset_index(drop=True)
+    high_speed["frame_gap"] = high_speed.groupby("player_id")["frame"].diff()
+    high_speed["run_id"] = (high_speed["frame_gap"] > 1).cumsum()
+
+    # Calculate duration of each run
+    run_durations = (
+        high_speed.groupby(["player_id", "run_id"])
+        .agg({"timestamp": ["first", "last"]})
+        .reset_index()
+    )
+
+    run_durations.columns = ["player_id", "run_id", "start_time", "end_time"]
+    run_durations["duration"] = (
+        pd.to_timedelta(run_durations["end_time"]).dt.total_seconds()
+        - pd.to_timedelta(run_durations["start_time"]).dt.total_seconds()
+    )
+
+    # Filter runs >= min_duration
+    valid_runs = run_durations[run_durations["duration"] >= min_duration][
+        ["player_id", "run_id"]
+    ]
+
+    # Keep only frames from valid runs
+    runs = high_speed.merge(valid_runs, on=["player_id", "run_id"], how="inner")
+    runs = runs.drop(["frame_gap", "run_id"], axis=1)
+
+    print(
+        f"✓ Detected {len(runs):,} frames with velocity >= {velocity_threshold} m/s and duration >= {min_duration}s"
+    )
     print(f"✓ From {runs['player_id'].nunique()} unique players")
 
     return runs

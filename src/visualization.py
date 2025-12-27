@@ -1,36 +1,39 @@
 """
-Visualization functions for football analytics
+Visualization functions for football pitch and tracking data
 """
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 
 def draw_pitch(
     ax=None, pitch_length=105, pitch_width=68, color="white", linecolor="black"
 ):
     """
-    Draw a football pitch
+    Draw a regulation football pitch.
 
     Args:
         ax: Matplotlib axis (creates new if None)
-        pitch_length: Length in meters
-        pitch_width: Width in meters
-        color: Pitch color
-        linecolor: Line color
+        pitch_length (float): Length in meters (default: 105)
+        pitch_width (float): Width in meters (default: 68)
+        color (str): Pitch background color
+        linecolor (str): Line color
 
     Returns:
-        Matplotlib axis
+        matplotlib.axes.Axes: Configured axis with pitch
     """
     if ax is None:
         fig, ax = plt.subplots(figsize=(12, 8))
 
+    half_length = pitch_length / 2
+    half_width = pitch_width / 2
+
     # Pitch outline
     ax.add_patch(
         patches.Rectangle(
-            (-pitch_length / 2, -pitch_width / 2),
+            (-half_length, -half_width),
             pitch_length,
             pitch_width,
             facecolor=color,
@@ -40,17 +43,15 @@ def draw_pitch(
     )
 
     # Center line
-    ax.plot([0, 0], [-pitch_width / 2, pitch_width / 2], color=linecolor, linewidth=2)
+    ax.plot([0, 0], [-half_width, half_width], color=linecolor, linewidth=2)
 
     # Center circle
-    circle = plt.Circle((0, 0), 9.15, fill=False, color=linecolor, linewidth=2)
-    ax.add_patch(circle)
+    ax.add_patch(plt.Circle((0, 0), 9.15, fill=False, color=linecolor, linewidth=2))
 
     # Penalty boxes
-    # Left
     ax.add_patch(
         patches.Rectangle(
-            (-pitch_length / 2, -20.15),
+            (-half_length, -20.15),
             16.5,
             40.3,
             fill=False,
@@ -58,10 +59,9 @@ def draw_pitch(
             linewidth=2,
         )
     )
-    # Right
     ax.add_patch(
         patches.Rectangle(
-            (pitch_length / 2 - 16.5, -20.15),
+            (half_length - 16.5, -20.15),
             16.5,
             40.3,
             fill=False,
@@ -71,10 +71,9 @@ def draw_pitch(
     )
 
     # Goal boxes
-    # Left
     ax.add_patch(
         patches.Rectangle(
-            (-pitch_length / 2, -9.16),
+            (-half_length, -9.16),
             5.5,
             18.32,
             fill=False,
@@ -82,10 +81,9 @@ def draw_pitch(
             linewidth=2,
         )
     )
-    # Right
     ax.add_patch(
         patches.Rectangle(
-            (pitch_length / 2 - 5.5, -9.16),
+            (half_length - 5.5, -9.16),
             5.5,
             18.32,
             fill=False,
@@ -94,49 +92,103 @@ def draw_pitch(
         )
     )
 
-    # Set limits and aspect
-    ax.set_xlim(-pitch_length / 2 - 5, pitch_length / 2 + 5)
-    ax.set_ylim(-pitch_width / 2 - 5, pitch_width / 2 + 5)
+    ax.set_xlim(-half_length - 5, half_length + 5)
+    ax.set_ylim(-half_width - 5, half_width + 5)
     ax.set_aspect("equal")
     ax.axis("off")
 
     return ax
 
 
-def plot_players(ax, df, frame_number, color_by="is_detected", show_ids=False):
+def add_match_info(ax, match_data, frame_number, df):
     """
-    Plot player positions for one frame
+    Add match information to plot.
 
     Args:
         ax: Matplotlib axis
-        df: Tracking DataFrame
-        frame_number: Which frame to plot
-        color_by: 'is_detected', 'player_id', or 'velocity'
-        show_ids: Show player IDs as text
+        match_data (dict): Match metadata
+        frame_number (int): Current frame
+        df (pd.DataFrame): Tracking data with timestamp
+    """
+    home_name = match_data["metadata"]["home_team"]["name"]
+    away_name = match_data["metadata"]["away_team"]["name"]
+    home_score = match_data["metadata"]["home_team_score"]
+    away_score = match_data["metadata"]["away_team_score"]
+
+    # Get timestamp
+    frame_data = df[df["frame"] == frame_number]
+    if len(frame_data) > 0:
+        timestamp = frame_data.iloc[0]["timestamp"]
+        period = frame_data.iloc[0]["period"]
+
+        # Convert timestamp to minutes:seconds
+        time_parts = timestamp.split(":")
+        minutes = int(time_parts[1])
+        seconds = int(float(time_parts[2]))
+
+        match_info = f"{home_name} {home_score} - {away_score} {away_name}\n"
+        match_info += f"Period {period} | {minutes}:{seconds:02d}"
+    else:
+        match_info = f"{home_name} {home_score} - {away_score} {away_name}"
+
+    ax.text(
+        0.5,
+        1.02,
+        match_info,
+        transform=ax.transAxes,
+        ha="center",
+        va="bottom",
+        fontsize=11,
+        weight="bold",
+    )
+
+
+def plot_players(
+    ax,
+    df,
+    frame_number,
+    home_player_ids=None,
+    away_player_ids=None,
+    show_ids=False,
+    show_ball=False,
+    ball_df=None,
+):
+    """
+    Plot player positions for a single frame.
+
+    Args:
+        ax: Matplotlib axis
+        df (pd.DataFrame): Tracking data
+        frame_number (int): Frame to plot
+        home_player_ids (list, optional): Home team player IDs (colored blue)
+        away_player_ids (list, optional): Away team player IDs (colored red)
+        show_ids (bool): Display player IDs as text
+        show_ball (bool): Display ball position
+        ball_df (pd.DataFrame, optional): Ball tracking data
 
     Returns:
-        Matplotlib axis
+        matplotlib.axes.Axes: Updated axis
     """
-    # Get frame data
-    frame_df = df[df["frame"] == frame_number].copy()
+    frame_df = df[df["frame"] == frame_number]
 
     if len(frame_df) == 0:
-        print(f"No data for frame {frame_number}")
         return ax
 
-    # Color mapping
-    if color_by == "is_detected":
-        colors = [
-            "red" if not detected else "green" for detected in frame_df["is_detected"]
-        ]
-        label = "Detected" if any(frame_df["is_detected"]) else None
-    elif color_by == "velocity" and "velocity" in frame_df.columns:
-        colors = frame_df["velocity"]
+    # Determine colors by team
+    if home_player_ids is not None and away_player_ids is not None:
+        colors = []
+        for pid in frame_df["player_id"]:
+            if pid in home_player_ids:
+                colors.append("blue")
+            elif pid in away_player_ids:
+                colors.append("red")
+            else:
+                colors.append("gray")
     else:
         colors = "blue"
 
     # Plot players
-    scatter = ax.scatter(
+    ax.scatter(
         frame_df["x"],
         frame_df["y"],
         c=colors,
@@ -147,17 +199,34 @@ def plot_players(ax, df, frame_number, color_by="is_detected", show_ids=False):
         zorder=10,
     )
 
-    # Add player IDs if requested
+    # Optional player IDs
     if show_ids:
         for _, player in frame_df.iterrows():
             ax.text(
                 player["x"],
                 player["y"],
-                str(player["player_id"])[-4:],  # Last 4 digits
+                str(player["player_id"])[-4:],
                 ha="center",
                 va="center",
                 fontsize=6,
                 weight="bold",
+                color="white",
+            )
+
+    # Plot ball
+    if show_ball and ball_df is not None:
+        ball_frame = ball_df[ball_df["frame"] == frame_number]
+        if len(ball_frame) > 0:
+            ax.scatter(
+                ball_frame["x"].iloc[0],
+                ball_frame["y"].iloc[0],
+                c="white",
+                s=100,
+                edgecolors="black",
+                linewidths=2,
+                marker="o",
+                zorder=15,
+                label="Ball",
             )
 
     return ax
@@ -165,37 +234,32 @@ def plot_players(ax, df, frame_number, color_by="is_detected", show_ids=False):
 
 def plot_voronoi(ax, df, frame_number, alpha=0.3):
     """
-    Plot Voronoi diagram on pitch
+    Overlay Voronoi diagram on pitch.
 
     Args:
         ax: Matplotlib axis
-        df: Tracking DataFrame
-        frame_number: Which frame to plot
-        alpha: Transparency of Voronoi regions
+        df (pd.DataFrame): Tracking data
+        frame_number (int): Frame to plot
+        alpha (float): Region transparency
 
     Returns:
-        Matplotlib axis
+        matplotlib.axes.Axes: Updated axis
     """
-    from scipy.spatial import Voronoi, voronoi_plot_2d
+    from scipy.spatial import Voronoi
 
-    # Get frame data
-    frame_df = df[df["frame"] == frame_number].copy()
+    frame_df = df[df["frame"] == frame_number]
 
     if len(frame_df) < 4:
-        print("Need at least 4 players for Voronoi")
         return ax
 
-    # Get positions
     points = frame_df[["x", "y"]].values
 
-    # Calculate Voronoi
     try:
         vor = Voronoi(points)
-    except Exception as e:
-        print(f"Voronoi failed: {e}")
+    except:
         return ax
 
-    # Plot Voronoi regions
+    # Draw regions
     for region in vor.regions:
         if -1 not in region and len(region) > 0:
             polygon = [vor.vertices[i] for i in region]
@@ -204,32 +268,49 @@ def plot_voronoi(ax, df, frame_number, alpha=0.3):
     return ax
 
 
-def plot_space_creation_heatmap(ax, runs_df, bins=20):
+def plot_space_creation_heatmap(ax, runs_df, bins=15, team_name=None, match_info=None):
     """
-    Plot heatmap showing where space was created
+    Create heatmap of space creation locations.
 
     Args:
         ax: Matplotlib axis
-        runs_df: DataFrame from analyze_offball_runs() with x, y, space_created
-        bins: Number of bins for heatmap
+        runs_df (pd.DataFrame): Runs with x, y, space_created columns
+        bins (int): Histogram bins (default: 15)
+        team_name (str, optional): Team name for title
+        match_info (str, optional): Match info string (e.g., "Team A 2-1 Team B")
 
     Returns:
-        Matplotlib axis
+        tuple: (axis, image) or (axis, None) if error
     """
-    if "x" not in runs_df.columns or "y" not in runs_df.columns:
-        print("Need x, y columns in runs_df")
+    if len(runs_df) == 0 or "x" not in runs_df.columns:
         return ax, None
 
-    if len(runs_df) == 0:
-        print("No runs to plot")
-        return ax, None
+    # Calculate total space created
+    total_space = runs_df["space_created"].sum()
+    num_runs = len(runs_df)
 
-    # Create 2D histogram
+    # Add match info and stats as title
+    if match_info and team_name:
+        title = (
+            f"{match_info}\n{team_name}: {num_runs} runs, {total_space:,.0f} m² created"
+        )
+        ax.text(
+            0.5,
+            1.02,
+            title,
+            transform=ax.transAxes,
+            ha="center",
+            va="bottom",
+            fontsize=11,
+            weight="bold",
+        )
+
+    # 2D histogram weighted by space created
     heatmap, xedges, yedges = np.histogram2d(
         runs_df["x"], runs_df["y"], bins=bins, weights=runs_df["space_created"]
     )
 
-    # Normalize to avoid all-white
+    # Normalize
     heatmap = heatmap / heatmap.max() if heatmap.max() > 0 else heatmap
 
     # Plot heatmap
@@ -238,14 +319,14 @@ def plot_space_creation_heatmap(ax, runs_df, bins=20):
         heatmap.T,
         extent=extent,
         origin="lower",
-        cmap="Reds",  # Changed to Reds
+        cmap="Reds",
         alpha=0.7,
         aspect="auto",
         vmin=0,
         vmax=1,
     )
 
-    # Add scatter points on top
+    # Overlay scatter
     ax.scatter(
         runs_df["x"],
         runs_df["y"],
@@ -258,3 +339,92 @@ def plot_space_creation_heatmap(ax, runs_df, bins=20):
     )
 
     return ax, im
+
+
+def plot_run_trajectories(
+    ax,
+    trajectories_df,
+    color="blue",
+    alpha=0.6,
+    top_percentile=None,
+    velocity_colormap=False,
+):
+    """
+    Plot run trajectories as arrows from start to end position.
+
+    Args:
+        ax: Matplotlib axis
+        trajectories_df (pd.DataFrame): Grouped trajectories with start_x, start_y, end_x, end_y
+        color (str): Arrow color (if not using velocity colormap)
+        alpha (float): Arrow transparency
+        top_percentile (float, optional): Only show top X% by space_created (e.g., 0.25 for top 25%)
+        velocity_colormap (bool): Color arrows by max_velocity
+
+    Returns:
+        matplotlib.axes.Axes: Updated axis
+    """
+    if len(trajectories_df) == 0:
+        return ax
+
+    df = trajectories_df.copy()
+
+    # Filter to top percentile if specified
+    if top_percentile is not None:
+        threshold = df["total_space_created"].quantile(1 - top_percentile)
+        df = df[df["total_space_created"] >= threshold]
+
+    # Calculate arrow components
+    df["dx"] = df["end_x"] - df["start_x"]
+    df["dy"] = df["end_y"] - df["start_y"]
+
+    # Plot trajectories
+    for idx, row in df.iterrows():
+        # Determine color
+        if velocity_colormap and "max_velocity" in df.columns:
+            # Normalize velocity to 0-1 range for colormap
+            vel_normalized = (row["max_velocity"] - 5.0) / (
+                12.0 - 5.0
+            )  # 5-12 m/s range
+            vel_normalized = np.clip(vel_normalized, 0, 1)
+            arrow_color = plt.cm.Reds(vel_normalized)
+        else:
+            arrow_color = color
+
+        # Draw arrow
+        ax.arrow(
+            row["start_x"],
+            row["start_y"],
+            row["dx"],
+            row["dy"],
+            head_width=2.5,
+            head_length=2.0,
+            fc=arrow_color,
+            ec="black",
+            alpha=alpha,
+            linewidth=1.5,
+            zorder=5,
+        )
+
+        # Mark start (green) and end (red)
+        ax.scatter(
+            row["start_x"],
+            row["start_y"],
+            c="green",
+            s=80,
+            edgecolors="black",
+            linewidths=1.5,
+            zorder=10,
+            alpha=0.8,
+        )
+        ax.scatter(
+            row["end_x"],
+            row["end_y"],
+            c="red",
+            s=80,
+            edgecolors="black",
+            linewidths=1.5,
+            zorder=10,
+            alpha=0.8,
+        )
+
+    return ax

@@ -1,5 +1,12 @@
-pandas
-numpy
-scipy
-matplotlib
-requests
+# Core Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Visualization
+matplotlib>=3.7.0
+
+# Spatial Analysis
+scipy>=1.10.0
+
+# Progress Bars
+tqdm>=4.65.0
