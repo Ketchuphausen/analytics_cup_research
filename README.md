@@ -35,7 +35,7 @@ Space_Created = Voronoi_Area(ball_carrier, t₀+3s) - Voronoi_Area(ball_carrier,
 
 ### Results
 
-Across 10 matches, **523 distinct off-ball runs** were detected (average 52.3 runs/match) that created a combined **2.98 million m²** of space for ball carriers.
+Across 10 matches, **523 distinct off-ball runs** were detected (average 52.3 runs/match) with an average of **5,692 m²** of space created per run for ball carriers.
 
 **Key Findings:**
 - Average space creation: **5,692 m²** per run (~80% of pitch area)
