@@ -100,49 +100,6 @@ def draw_pitch(
     return ax
 
 
-def add_match_info(ax, match_data, frame_number, df):
-    """
-    Add match information to plot.
-
-    Args:
-        ax: Matplotlib axis
-        match_data (dict): Match metadata
-        frame_number (int): Current frame
-        df (pd.DataFrame): Tracking data with timestamp
-    """
-    home_name = match_data["metadata"]["home_team"]["name"]
-    away_name = match_data["metadata"]["away_team"]["name"]
-    home_score = match_data["metadata"]["home_team_score"]
-    away_score = match_data["metadata"]["away_team_score"]
-
-    # Get timestamp
-    frame_data = df[df["frame"] == frame_number]
-    if len(frame_data) > 0:
-        timestamp = frame_data.iloc[0]["timestamp"]
-        period = frame_data.iloc[0]["period"]
-
-        # Convert timestamp to minutes:seconds
-        time_parts = timestamp.split(":")
-        minutes = int(time_parts[1])
-        seconds = int(float(time_parts[2]))
-
-        match_info = f"{home_name} {home_score} - {away_score} {away_name}\n"
-        match_info += f"Period {period} | {minutes}:{seconds:02d}"
-    else:
-        match_info = f"{home_name} {home_score} - {away_score} {away_name}"
-
-    ax.text(
-        0.5,
-        1.02,
-        match_info,
-        transform=ax.transAxes,
-        ha="center",
-        va="bottom",
-        fontsize=11,
-        weight="bold",
-    )
-
-
 def plot_players(
     ax,
     df,
@@ -266,79 +223,6 @@ def plot_voronoi(ax, df, frame_number, alpha=0.3):
             ax.fill(*zip(*polygon), alpha=alpha, edgecolor="black", linewidth=0.5)
 
     return ax
-
-
-def plot_space_creation_heatmap(ax, runs_df, bins=15, team_name=None, match_info=None):
-    """
-    Create heatmap of space creation locations.
-
-    Args:
-        ax: Matplotlib axis
-        runs_df (pd.DataFrame): Runs with x, y, space_created columns
-        bins (int): Histogram bins (default: 15)
-        team_name (str, optional): Team name for title
-        match_info (str, optional): Match info string (e.g., "Team A 2-1 Team B")
-
-    Returns:
-        tuple: (axis, image) or (axis, None) if error
-    """
-    if len(runs_df) == 0 or "x" not in runs_df.columns:
-        return ax, None
-
-    # Calculate total space created
-    total_space = runs_df["space_created"].sum()
-    num_runs = len(runs_df)
-
-    # Add match info and stats as title
-    if match_info and team_name:
-        title = (
-            f"{match_info}\n{team_name}: {num_runs} runs, {total_space:,.0f} m² created"
-        )
-        ax.text(
-            0.5,
-            1.02,
-            title,
-            transform=ax.transAxes,
-            ha="center",
-            va="bottom",
-            fontsize=11,
-            weight="bold",
-        )
-
-    # 2D histogram weighted by space created
-    heatmap, xedges, yedges = np.histogram2d(
-        runs_df["x"], runs_df["y"], bins=bins, weights=runs_df["space_created"]
-    )
-
-    # Normalize
-    heatmap = heatmap / heatmap.max() if heatmap.max() > 0 else heatmap
-
-    # Plot heatmap
-    extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
-    im = ax.imshow(
-        heatmap.T,
-        extent=extent,
-        origin="lower",
-        cmap="Reds",
-        alpha=0.7,
-        aspect="auto",
-        vmin=0,
-        vmax=1,
-    )
-
-    # Overlay scatter
-    ax.scatter(
-        runs_df["x"],
-        runs_df["y"],
-        c=runs_df["space_created"],
-        s=50,
-        cmap="Reds",
-        alpha=0.5,
-        edgecolors="black",
-        linewidths=0.5,
-    )
-
-    return ax, im
 
 
 def plot_run_trajectories(

@@ -174,46 +174,65 @@ def analyze_offball_runs(
 
 def group_runs_to_trajectories(runs_df):
     """
-    Group consecutive run frames into distinct trajectories.
+    Group consecutive run frames into trajectories with start/end positions.
 
     Args:
-        runs_df (pd.DataFrame): Run data with x, y coordinates
+        runs_df (pd.DataFrame): Run frames with player_id, frame, x, y, velocity, space_created
 
     Returns:
-        pd.DataFrame: One row per run with start/end positions and aggregated metrics
+        pd.DataFrame: Trajectories with start/end positions and space delta
     """
     if len(runs_df) == 0:
         return pd.DataFrame()
 
-    runs_df = runs_df.sort_values(["player_id", "frame"]).copy()
-    runs_df["frame_diff"] = runs_df.groupby("player_id")["frame"].diff()
-    runs_df["run_id"] = (runs_df["frame_diff"] > 10).cumsum()
+    # Check if run_id exists, if not create it
+    if "run_id" not in runs_df.columns:
+        runs_df = runs_df.sort_values(["player_id", "frame"])
+        runs_df["frame_diff"] = runs_df.groupby("player_id")["frame"].diff()
+        runs_df["is_new_run"] = (runs_df["frame_diff"] > 1) | (
+            runs_df["frame_diff"].isna()
+        )
+        runs_df["run_id"] = runs_df.groupby("player_id")["is_new_run"].cumsum()
+        runs_df["run_id"] = (
+            runs_df["player_id"].astype(str) + "_" + runs_df["run_id"].astype(str)
+        )
 
     trajectories = []
 
-    for (player_id, run_id), group in runs_df.groupby(["player_id", "run_id"]):
-        if len(group) < 3:
+    for run_id in runs_df["run_id"].unique():
+        run = runs_df[runs_df["run_id"] == run_id].sort_values("frame")
+
+        if len(run) == 0:
             continue
 
-        first, last = group.iloc[0], group.iloc[-1]
+        # Get first and last frame
+        start = run.iloc[0]
+        end = run.iloc[-1]
 
-        trajectories.append(
-            {
-                "player_id": player_id,
-                "team": first["team"],
-                "start_frame": first["frame"],
-                "end_frame": last["frame"],
-                "duration_frames": len(group),
-                "start_x": first["x"],
-                "start_y": first["y"],
-                "end_x": last["x"],
-                "end_y": last["y"],
-                "max_velocity": group["velocity"].max(),
-                "avg_velocity": group["velocity"].mean(),
-                "total_space_created": group["space_created"].sum(),
-                "is_detected": group["is_detected"].mean(),
-            }
-        )
+        # Calculate space created as DELTA (end - start)
+        space_delta = end["space_created"] - start["space_created"]
+
+        # Build trajectory dict (only include columns that exist)
+        traj = {
+            "run_id": run_id,
+            "player_id": start["player_id"],
+            "team": start["team"],
+            "start_frame": start["frame"],
+            "end_frame": end["frame"],
+            "duration_frames": len(run),
+            "start_x": start["x"],
+            "start_y": start["y"],
+            "end_x": end["x"],
+            "end_y": end["y"],
+            "max_velocity": run["velocity"].max(),
+            "total_space_created": space_delta,
+        }
+
+        # Add match_id only if it exists
+        if "match_id" in start.index:
+            traj["match_id"] = start["match_id"]
+
+        trajectories.append(traj)
 
     return pd.DataFrame(trajectories)
 

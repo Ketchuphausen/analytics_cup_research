@@ -22,6 +22,71 @@ MATCH_ID = "2011166"
 VELOCITY_THRESHOLD = 5.0
 TEAM = "away"
 
+
+def create_trajectory_plot(
+    trajectories, match_info, team_name, color, filename, total_runs=None
+):
+    """Create and save trajectory visualization"""
+    fig, ax = plt.subplots(figsize=(16, 10))
+    draw_pitch(ax)
+    plot_run_trajectories(
+        ax, trajectories, color=color, alpha=0.65, velocity_colormap=False
+    )
+
+    # Build title
+    if total_runs is not None:
+        pct = (len(trajectories) / total_runs) * 100
+        title = f"{match_info}\n{team_name}: {len(trajectories)}/{total_runs} runs ({pct:.1f}%), avg {trajectories['total_space_created'].mean():,.0f} m²/run"
+    else:
+        title = f"{match_info}\n{team_name}: {len(trajectories)} off-ball runs, {trajectories['total_space_created'].sum():,.0f} m² space created"
+
+    ax.text(
+        0.5,
+        1.02,
+        title,
+        transform=ax.transAxes,
+        ha="center",
+        va="bottom",
+        fontsize=13,
+        weight="bold",
+    )
+
+    # Legend
+    ax.legend(
+        handles=[
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor="green",
+                markersize=12,
+                markeredgecolor="black",
+                markeredgewidth=1.5,
+                label="Run Start",
+            ),
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor="red",
+                markersize=12,
+                markeredgecolor="black",
+                markeredgewidth=1.5,
+                label="Run End",
+            ),
+        ],
+        loc="upper left",
+        fontsize=11,
+        framealpha=0.9,
+    )
+
+    plt.tight_layout()
+    plt.savefig(filename, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
 # Load data
 data = load_match_data(MATCH_ID)
 poss_df = get_possession_info(data["tracking"])
@@ -62,75 +127,61 @@ for period in [1, 2]:
         home_team_side = data["metadata"].get("home_team_side", [])
         if len(home_team_side) > period - 1:
             if home_team_side[period - 1] == "right_to_left":
-                traj.loc[traj["team"] == "home", ["start_x", "end_x"]] *= -1
+                traj.loc[
+                    traj["team"] == "home", ["start_x", "end_x", "start_y", "end_y"]
+                ] *= -1
             else:
-                traj.loc[traj["team"] == "away", ["start_x", "end_x"]] *= -1
-
+                traj.loc[
+                    traj["team"] == "away", ["start_x", "end_x", "start_y", "end_y"]
+                ] *= -1
         all_traj.append(traj)
 
 # Combine and filter selected team
 trajectories = pd.concat(all_traj, ignore_index=True)
 selected_traj = trajectories[trajectories["team"] == TEAM]
+selected_traj = selected_traj[selected_traj["end_x"] > selected_traj["start_x"]]
 
-# Create figure
-fig, ax = plt.subplots(figsize=(16, 10))
-draw_pitch(ax)
-plot_run_trajectories(
-    ax, selected_traj, color=selected_color, alpha=0.65, velocity_colormap=False
-)
-
-# Title
-title = f"{match_info}\n{selected_name}: {len(selected_traj)} off-ball runs, {selected_traj['total_space_created'].sum():,.0f} m² space created"
-ax.text(
-    0.5,
-    1.02,
-    title,
-    transform=ax.transAxes,
-    ha="center",
-    va="bottom",
-    fontsize=13,
-    weight="bold",
-)
-
-# Legend
-ax.legend(
-    handles=[
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="green",
-            markersize=12,
-            markeredgecolor="black",
-            markeredgewidth=1.5,
-            label="Run Start",
-        ),
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor="red",
-            markersize=12,
-            markeredgecolor="black",
-            markeredgewidth=1.5,
-            label="Run End",
-        ),
-    ],
-    loc="upper left",
-    fontsize=11,
-    framealpha=0.9,
-)
-
-# Create figs directory in parent (main) directory
+# Create figs directory
 figs_dir = Path(__file__).parent.parent / "figs"
 figs_dir.mkdir(exist_ok=True)
 
-plt.tight_layout()
-plt.savefig(figs_dir / "trajectory_visualization.png", dpi=150, bbox_inches="tight")
-plt.close()
+# Create visualizations
+total_runs = len(selected_traj)
 
-print(f"✓ Created: {figs_dir / 'trajectory_visualization.png'}")
-print(f"  Team: {selected_name} ({TEAM})")
-print(f"  Runs: {len(selected_traj)}")
+# All runs
+create_trajectory_plot(
+    selected_traj,
+    match_info,
+    selected_name,
+    selected_color,
+    figs_dir / "trajectory_visualization.png",
+)
+print(f"✓ Created: trajectory_visualization.png ({total_runs} runs)")
+
+# Positive runs
+positive_runs = selected_traj[selected_traj["total_space_created"] > 0]
+create_trajectory_plot(
+    positive_runs,
+    match_info,
+    f"{selected_name}: Positive Space Runs",
+    selected_color,
+    figs_dir / "positive_space_runs.png",
+    total_runs,
+)
+print(
+    f"✓ Created: positive_space_runs.png ({len(positive_runs)} runs, {len(positive_runs) / total_runs * 100:.1f}%)"
+)
+
+# Negative runs (including zero)
+negative_runs = selected_traj[selected_traj["total_space_created"] <= 0]
+create_trajectory_plot(
+    negative_runs,
+    match_info,
+    f"{selected_name}: Negative Space Runs",
+    selected_color,
+    figs_dir / "negative_space_runs.png",
+    total_runs,
+)
+print(
+    f"✓ Created: negative_space_runs.png ({len(negative_runs)} runs, {len(negative_runs) / total_runs * 100:.1f}%)"
+)
